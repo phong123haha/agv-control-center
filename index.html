@@ -1,0 +1,99 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>AGV CLOUD CENTER</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Inter:wght@400;600&display=swap');
+    :root { --bg: #090e17; --panel: #111827; --text: #e2e8f0; --accent: #0ea5e9; --success: #10b981; --border: #1f2937; }
+    * { box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; padding: 15px; }
+    h2 { font-family: 'Orbitron', sans-serif; color: var(--accent); letter-spacing: 2px; text-align: center; font-size: 22px; margin-bottom: 20px; }
+    .dashboard { background: var(--panel); padding: 15px 20px; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.5); width: 100%; max-width: 380px; margin-bottom: 25px; }
+    .stat-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed var(--border); font-size: 15px; align-items: center; }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: #94a3b8; }
+    .val { font-weight: 600; font-size: 16px; color: #fff; }
+    .val.accent { color: var(--accent); font-size: 20px; font-family: 'Orbitron', sans-serif; }
+    .val.success { color: var(--success); }
+    .control-pad { display: grid; grid-template-areas: ". a ." "b center c" ". d ."; gap: 12px; width: 100%; max-width: 280px; margin: 0 auto 30px auto; }
+    .btn { background: linear-gradient(145deg, #1e293b, #0f172a); border: 1px solid var(--border); border-radius: 20px; aspect-ratio: 1; font-family: 'Orbitron', sans-serif; font-size: 32px; font-weight: 700; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .btn:active { transform: scale(0.92); background: #0284c7; }
+    .btn-a { grid-area: a; } .btn-b { grid-area: b; } .btn-c { grid-area: c; } .btn-d { grid-area: d; }
+    .btn-center { grid-area: center; background: #0f172a; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 24px; color: #334155; }
+    .history-box { width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 15px; }
+    .history-title { font-size: 13px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .log-container { max-height: 180px; overflow-y: auto; padding-right: 5px; }
+    .hist-item { background: #0b1120; margin-bottom: 8px; padding: 10px; border-radius: 8px; border-left: 3px solid var(--accent); font-size: 14px; display: flex; align-items: center; gap: 10px; }
+    .hist-item .step { color: #0ea5e9; font-family: 'Orbitron', sans-serif; font-size: 11px; background: rgba(14,165,233,0.1); padding: 3px 6px; border-radius: 4px; }
+  </style>
+
+  <!-- Nạp thư viện Firebase trực tiếp từ Google -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+</head>
+<body>
+  <h2>AGV CLOUD CONTROL</h2>
+  <div class="dashboard">
+    <div class="stat-row"><span class="stat-label">Vị trí hiện tại</span><span id="pos" class="val accent">_</span></div>
+    <div class="stat-row"><span class="stat-label">Đang di chuyển tới</span><span id="tgt" class="val">-</span></div>
+    <div class="stat-row"><span class="stat-label">Trạng thái</span><span id="state" class="val success">Kết nối Firebase...</span></div>
+  </div>
+
+  <div class="control-pad">
+    <button class="btn btn-a" onclick="send('A')">A</button>
+    <button class="btn btn-b" onclick="send('B')">B</button>
+    <div class="btn-center">☁️</div>
+    <button class="btn btn-c" onclick="send('C')">C</button>
+    <button class="btn btn-d" onclick="send('D')">D</button>
+  </div>
+
+  <div class="history-box">
+    <div class="history-title">Nhật ký di chuyển (Live)</div>
+    <div class="log-container" id="history-log"></div>
+  </div>
+
+  <script>
+    // Cấu hình Database của ông
+    const firebaseConfig = {
+      databaseURL: "https://agv-system-a4342-default-rtdb.asia-southeast1.firebasedatabase.app"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // 1. Lắng nghe trạng thái Online
+    db.ref('.info/connected').on('value', function(snap) {
+      if (snap.val() === true) {
+        document.getElementById('state').innerText = "Đã kết nối Cloud";
+      } else {
+        document.getElementById('state').innerText = "Mất kết nối";
+      }
+    });
+
+    // 2. Lắng nghe Vị trí hiện tại
+    db.ref('/AGV_State/pos').on('value', (snap) => {
+      document.getElementById('pos').innerText = snap.val() || "_";
+    });
+
+    // 3. Lắng nghe Lịch sử di chuyển (Tự động cập nhật không cần F5)
+    db.ref('/AGV_Lich_Su_Di_Chuyen').limitToLast(15).on('value', (snap) => {
+      let logHTML = "";
+      snap.forEach((child) => {
+        let data = child.val();
+        logHTML = `<div class='hist-item'><span class='step'>[${data["1_Thoi_Gian"]}]</span> <span class='msg'>${data["3_Hanh_Dong"]}</span></div>` + logHTML;
+      });
+      document.getElementById('history-log').innerHTML = logHTML;
+    });
+
+    // 4. Bắn lệnh lên Cloud
+    function send(cmd) {
+      document.getElementById('tgt').innerText = cmd;
+      document.getElementById('state').innerText = "Đang truyền lệnh...";
+      db.ref('/AGV_Command').set({ cmd: cmd }); // Đẩy chữ A, B, C, D lên nhánh Command
+      
+      setTimeout(() => { document.getElementById('tgt').innerText = "-"; }, 3000);
+    }
+  </script>
+</body>
+</html>
